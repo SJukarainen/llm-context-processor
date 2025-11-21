@@ -1,15 +1,15 @@
 # LLM Context Processor
 
-A standalone Python tool for converting documents to markdown format optimized for LLM context windows. Built on Microsoft's MarkItDown library, this processor handles 25+ file formats and generates clean, token-efficient markdown output.
+A standalone Python tool for converting documents to markdown format optimized for LLM context windows. Built on Microsoft's MarkItDown library, this processor handles 19 document formats and generates clean, token-efficient markdown output.
 
 ## Features
 
-- **25+ File Formats**: PDFs, Office documents (Word, Excel, PowerPoint), images, audio files, HTML, markdown, and more
+- **19 Document Formats**: PDFs, Office documents (Word, Excel, PowerPoint), HTML, markdown, and more
 - **Quality Text Sanitization**: Removes watermarks, normalizes whitespace, optimizes tables for token efficiency
 - **JSON Metadata**: Optional structured metadata output with file statistics
 - **Combined Output**: Automatically creates a single markdown file combining all processed documents
 - **Standalone**: No LLM dependencies - uses only MarkItDown and standard Python packages
-- **Easy Installation**: Simple pip install from cloned repository
+- **Easy Installation**: Simple pip install from GitHub
 
 ## Supported File Formats
 
@@ -19,8 +19,9 @@ A standalone Python tool for converting documents to markdown format optimized f
 - **Data**: CSV, TSV
 - **Web**: HTML, HTM, XML
 - **Text**: MD, TXT
-- **Media**: JPG, JPEG, PNG, GIF, BMP, TIFF, MP3, WAV, M4A
 - **Archives**: ZIP
+
+> **Note**: MarkItDown also supports images (JPG, PNG, etc.) and audio files (MP3, WAV, M4A) but these require LLM/vision model configuration for OCR and speech-to-text. The default installation only supports document formats listed above.
 
 ## Installation
 

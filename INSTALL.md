@@ -63,12 +63,14 @@ When you process documents, the tool creates:
 
 ## Supported File Types
 
-The tool handles 25+ file formats including:
+The tool handles 19 document formats including:
 - PDF documents
 - Microsoft Office files (Word, Excel, PowerPoint)
-- Images (JPG, PNG, etc.)
-- Audio files (MP3, WAV)
-- HTML and text files
+- Web formats (HTML, XML)
+- Text and markdown files
+- Spreadsheets (Excel, CSV)
+
+**Note**: Images and audio files require additional LLM configuration and are not supported in the default installation.
 
 See the full [README](README.md) for the complete list and advanced options.
 

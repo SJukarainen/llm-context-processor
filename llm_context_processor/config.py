@@ -43,15 +43,6 @@ class ExtractionConfig:
             ".odt",
             ".epub",
             ".zip",
-            ".jpg",
-            ".jpeg",
-            ".png",
-            ".gif",
-            ".bmp",
-            ".tiff",
-            ".mp3",
-            ".wav",
-            ".m4a",
         ]
     )
 

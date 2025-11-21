@@ -32,15 +32,6 @@ class MarkItDownExtractor(BaseExtractor):
         ".odt",
         ".epub",
         ".zip",
-        ".jpg",
-        ".jpeg",
-        ".png",
-        ".gif",
-        ".bmp",
-        ".tiff",
-        ".mp3",
-        ".wav",
-        ".m4a",
     }
 
     def __init__(self) -> None:
