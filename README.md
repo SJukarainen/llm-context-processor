@@ -24,9 +24,19 @@ A standalone Python tool for converting documents to markdown format optimized f
 
 ## Installation
 
+### Simple Installation (Recommended for Users)
+
+```bash
+pip install git+https://github.com/SJukarainen/llm-context-processor.git
+```
+
+See [INSTALL.md](INSTALL.md) for a beginner-friendly installation guide.
+
+### Developer Installation
+
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/llm-context-processor.git
+git clone https://github.com/SJukarainen/llm-context-processor.git
 cd llm-context-processor
 
 # Install in editable mode
