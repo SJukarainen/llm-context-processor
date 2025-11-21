@@ -1,8 +1,10 @@
 """Core document processing engine using MarkItDown."""
 
+import logging
 import os
 import sys
 import threading
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -17,6 +19,24 @@ from llm_context_processor.utils.file_utils import (
     should_skip_file,
 )
 from llm_context_processor.utils.sanitizer import sanitize_text
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class TextStats:
+    """Statistics for processed text."""
+    char_count: int
+    word_count: int
+    token_count: int
+
+
+def calculate_text_stats(text: str) -> TextStats:
+    """Calculate statistics for text content."""
+    char_count = len(text)
+    word_count = len(text.split())
+    token_count = char_count // 4
+    return TextStats(char_count, word_count, token_count)
 
 
 class ContextProcessor:
@@ -124,147 +144,134 @@ class ContextProcessor:
         for file_path in all_files:
             self._process_file(file_path)
 
-    def _process_file(self, file_path: str) -> None:
-        """Process a single file."""
-        with self.stats_lock:
+    def _process_file_internal(
+        self, file_path: str, output_file: str, use_locks: bool, display_name: str
+    ) -> None:
+        """Internal method to process a single file with flexible output and locking."""
+        if use_locks:
+            with self.stats_lock:
+                self.stats["total_files"] += 1
+        else:
             self.stats["total_files"] += 1
 
         if should_skip_file(os.path.basename(file_path)):
-            with self.stats_lock:
+            if use_locks:
+                with self.stats_lock:
+                    self.stats["skipped_files"] += 1
+            else:
                 self.stats["skipped_files"] += 1
-            print(f"Skipping: {os.path.relpath(file_path, self.input_path)}")
+            logger.info("Skipping: %s", display_name)
             return
 
         file_ext = get_file_extension(file_path)
         if file_ext not in self.config.extraction.supported_extensions:
-            with self.stats_lock:
+            if use_locks:
+                with self.stats_lock:
+                    self.stats["skipped_files"] += 1
+            else:
                 self.stats["skipped_files"] += 1
-            print(f"Skipping unsupported: {os.path.relpath(file_path, self.input_path)}")
+            logger.info("Skipping unsupported: %s", display_name)
             return
 
         file_size_mb = get_file_size_mb(file_path)
         if file_size_mb > self.config.extraction.max_file_size_mb:
-            with self.stats_lock:
+            if use_locks:
+                with self.stats_lock:
+                    self.stats["skipped_files"] += 1
+            else:
                 self.stats["skipped_files"] += 1
-            print(
-                f"Skipping large file ({file_size_mb:.1f}MB): {os.path.relpath(file_path, self.input_path)}"
-            )
+            logger.info("Skipping large file (%.1fMB): %s", file_size_mb, display_name)
             return
 
-        print(f"Processing: {os.path.relpath(file_path, self.input_path)}")
-
-        output_file_path = create_parallel_output_path(
-            file_path, self.input_path, self.output_path, output_ext=".md"
-        )
-        ensure_directory_exists(output_file_path)
+        logger.info("Processing: %s", display_name)
 
         if file_ext in [".md", ".txt"]:
-            print(f"  -> Copying text file directly")
-            if self._copy_text_file(file_path, output_file_path):
-                with self.stats_lock:
+            logger.info("  -> Copying text file directly")
+            if self._copy_text_file(file_path, output_file):
+                if use_locks:
+                    with self.stats_lock:
+                        self.stats["processed_files"] += 1
+                else:
                     self.stats["processed_files"] += 1
             else:
-                with self.stats_lock:
+                if use_locks:
+                    with self.stats_lock:
+                        self.stats["failed_files"] += 1
+                else:
                     self.stats["failed_files"] += 1
             return
 
         if not self.extractor.can_extract(file_path):
-            with self.stats_lock:
-                self.stats["failed_files"] += 1
-            self._write_error_file(
-                output_file_path, file_path, f"Unsupported file type: {file_ext}"
-            )
-            return
-
-        result = self.extractor.extract(file_path)
-
-        if not result.success:
-            print(f"  -> Extraction failed: {result.error_message}")
-            with self.stats_lock:
-                self.stats["failed_files"] += 1
-            self._write_error_file(
-                output_file_path,
-                file_path,
-                result.error_message or "Extraction failed",
-            )
-            return
-        else:
-            with self.stats_lock:
-                self.stats["markitdown_extractions"] += 1
-
-        sanitized_text = sanitize_text(result.text)
-        if self._write_output_file(output_file_path, file_path, sanitized_text, result.extraction_method):
-            with self.stats_lock:
-                self.stats["processed_files"] += 1
-        else:
-            with self.stats_lock:
-                self.stats["failed_files"] += 1
-
-    def _process_single_file(self, file_path: str, output_file: str) -> None:
-        """Process a single file with explicit output path."""
-        self.stats["total_files"] += 1
-
-        if should_skip_file(os.path.basename(file_path)):
-            self.stats["skipped_files"] += 1
-            print(f"Skipping: {os.path.basename(file_path)}")
-            return
-
-        file_ext = get_file_extension(file_path)
-        if file_ext not in self.config.extraction.supported_extensions:
-            self.stats["skipped_files"] += 1
-            print(f"Skipping unsupported: {os.path.basename(file_path)}")
-            return
-
-        file_size_mb = get_file_size_mb(file_path)
-        if file_size_mb > self.config.extraction.max_file_size_mb:
-            self.stats["skipped_files"] += 1
-            print(f"Skipping large file ({file_size_mb:.1f}MB): {os.path.basename(file_path)}")
-            return
-
-        print(f"Processing: {os.path.basename(file_path)}")
-
-        if file_ext in [".md", ".txt"]:
-            print(f"  -> Copying text file directly")
-            if self._copy_text_file(file_path, output_file):
-                self.stats["processed_files"] += 1
+            if use_locks:
+                with self.stats_lock:
+                    self.stats["failed_files"] += 1
             else:
                 self.stats["failed_files"] += 1
-            return
-
-        if not self.extractor.can_extract(file_path):
-            self.stats["failed_files"] += 1
             self._write_error_file(output_file, file_path, f"Unsupported file type: {file_ext}")
             return
 
         result = self.extractor.extract(file_path)
 
         if not result.success:
-            print(f"  -> Extraction failed: {result.error_message}")
-            self.stats["failed_files"] += 1
-            self._write_error_file(output_file, file_path, result.error_message or "Extraction failed")
+            logger.error("  -> Extraction failed: %s", result.error_message)
+            if use_locks:
+                with self.stats_lock:
+                    self.stats["failed_files"] += 1
+            else:
+                self.stats["failed_files"] += 1
+            self._write_error_file(
+                output_file,
+                file_path,
+                result.error_message or "Extraction failed",
+            )
             return
         else:
-            self.stats["markitdown_extractions"] += 1
+            if use_locks:
+                with self.stats_lock:
+                    self.stats["markitdown_extractions"] += 1
+            else:
+                self.stats["markitdown_extractions"] += 1
 
         sanitized_text = sanitize_text(result.text)
         if self._write_output_file(output_file, file_path, sanitized_text, result.extraction_method):
-            self.stats["processed_files"] += 1
+            if use_locks:
+                with self.stats_lock:
+                    self.stats["processed_files"] += 1
+            else:
+                self.stats["processed_files"] += 1
         else:
-            self.stats["failed_files"] += 1
+            if use_locks:
+                with self.stats_lock:
+                    self.stats["failed_files"] += 1
+            else:
+                self.stats["failed_files"] += 1
+
+    def _process_file(self, file_path: str) -> None:
+        """Process a single file in directory mode."""
+        output_file_path = create_parallel_output_path(
+            file_path, self.input_path, self.output_path, output_ext=".md"
+        )
+        ensure_directory_exists(output_file_path)
+
+        display_name = os.path.relpath(file_path, self.input_path)
+        self._process_file_internal(file_path, output_file_path, use_locks=True, display_name=display_name)
+
+    def _process_single_file(self, file_path: str, output_file: str) -> None:
+        """Process a single file with explicit output path in single-file mode."""
+        display_name = os.path.basename(file_path)
+        self._process_file_internal(file_path, output_file, use_locks=False, display_name=display_name)
 
     def _write_output_file(
         self, output_path: str, source_path: str, text: str, method: str
     ) -> bool:
         """Write extracted text to output file."""
         try:
-            char_count = len(text)
-            word_count = len(text.split())
-            token_count = char_count // 4
+            stats = calculate_text_stats(text)
 
             with self.stats_lock:
-                self.stats["total_chars"] += char_count
-                self.stats["total_words"] += word_count
-                self.stats["total_tokens"] += token_count
+                self.stats["total_chars"] += stats.char_count
+                self.stats["total_words"] += stats.word_count
+                self.stats["total_tokens"] += stats.token_count
 
             with open(output_path, "w", encoding="utf-8") as f:
                 f.write(text)
@@ -274,22 +281,15 @@ class ContextProcessor:
                     source_path=source_path,
                     extracted_text=text,
                     extraction_method=method,
-                    word_count=word_count,
-                    char_count=char_count,
+                    word_count=stats.word_count,
+                    char_count=stats.char_count,
                 )
 
-            with self.file_stats_lock:
-                self.file_stats.append({
-                    "filename": os.path.basename(source_path),
-                    "rel_path": os.path.relpath(source_path, self.input_path),
-                    "tokens": token_count,
-                    "words": word_count,
-                    "chars": char_count,
-                })
+            self._add_file_stats(source_path, stats)
 
             return True
-        except (IOError, OSError, PermissionError):
-            print(f"  -> Failed to write output file", file=sys.stderr)
+        except (IOError, OSError, PermissionError) as e:
+            logger.error("Failed to write output file: %s", e)
             return False
 
     def _write_error_file(self, output_path: str, source_path: str, error_msg: str) -> bool:
@@ -300,9 +300,20 @@ class ContextProcessor:
                 f.write(f"Status: FAILED\n")
                 f.write(f"Error: {error_msg}\n")
             return True
-        except (IOError, OSError, PermissionError):
-            print(f"  -> Failed to write error file", file=sys.stderr)
+        except (IOError, OSError, PermissionError) as e:
+            logger.error("Failed to write error file: %s", e)
             return False
+
+    def _add_file_stats(self, source_path: str, stats: TextStats) -> None:
+        """Add file statistics to tracking."""
+        with self.file_stats_lock:
+            self.file_stats.append({
+                "filename": os.path.basename(source_path),
+                "rel_path": os.path.relpath(source_path, self.input_path),
+                "tokens": stats.token_count,
+                "words": stats.word_count,
+                "chars": stats.char_count,
+            })
 
     def _copy_text_file(self, source_path: str, output_path: str) -> bool:
         """Copy text file directly and track statistics."""
@@ -310,14 +321,12 @@ class ContextProcessor:
             with open(source_path, "r", encoding="utf-8") as f:
                 text = f.read()
 
-            char_count = len(text)
-            word_count = len(text.split())
-            token_count = char_count // 4
+            stats = calculate_text_stats(text)
 
             with self.stats_lock:
-                self.stats["total_chars"] += char_count
-                self.stats["total_words"] += word_count
-                self.stats["total_tokens"] += token_count
+                self.stats["total_chars"] += stats.char_count
+                self.stats["total_words"] += stats.word_count
+                self.stats["total_tokens"] += stats.token_count
 
             with open(output_path, "w", encoding="utf-8") as f:
                 f.write(text)
@@ -327,22 +336,15 @@ class ContextProcessor:
                     source_path=source_path,
                     extracted_text=text,
                     extraction_method="direct_copy",
-                    word_count=word_count,
-                    char_count=char_count,
+                    word_count=stats.word_count,
+                    char_count=stats.char_count,
                 )
 
-            with self.file_stats_lock:
-                self.file_stats.append({
-                    "filename": os.path.basename(source_path),
-                    "rel_path": os.path.relpath(source_path, self.input_path),
-                    "tokens": token_count,
-                    "words": word_count,
-                    "chars": char_count,
-                })
+            self._add_file_stats(source_path, stats)
 
             return True
-        except (IOError, OSError, PermissionError, UnicodeDecodeError):
-            print(f"  -> Failed to copy text file", file=sys.stderr)
+        except (IOError, OSError, PermissionError, UnicodeDecodeError) as e:
+            logger.error("Failed to copy text file: %s", e)
             return False
 
     def _print_summary(self) -> None:
@@ -413,6 +415,6 @@ class ContextProcessor:
                 f.write(f"Output directory: {self.output_path}\n")
                 f.write("=" * 80 + "\n")
 
-            print(f"\nSummary written to: {summary_path}")
-        except (IOError, OSError, PermissionError):
-            print(f"Warning: Failed to write summary file", file=sys.stderr)
+            logger.info("Summary written to: %s", summary_path)
+        except (IOError, OSError, PermissionError) as e:
+            logger.warning("Failed to write summary file: %s", e)

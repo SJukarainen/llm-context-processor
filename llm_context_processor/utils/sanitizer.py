@@ -3,43 +3,116 @@
 import re
 import unicodedata
 
+# Pre-compiled regex patterns for performance
+_WHITESPACE_PATTERNS = [
+    (re.compile(r" {10,}"), " "),
+    (re.compile(r" {2,}"), " "),
+    (re.compile(r"\n{3,}"), "\n\n"),
+    (re.compile(r" +\n"), "\n"),
+    (re.compile(r"\n +"), "\n"),
+]
+
+_EXCEL_PATTERNS = [
+    (re.compile(r"\\\\+n"), "\n"),
+    (re.compile(r"\\n"), "\n"),
+    (re.compile(r"Unnamed: \d+"), "Col"),
+    (re.compile(r"\bNaN\b"), "-"),
+    (re.compile(r"(\w+)\.\d+"), r"\1"),
+]
+
+_EXCEL_DATETIME_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
+
+_REDUNDANT_PATTERNS = [
+    (re.compile(r"[-=_]{10,}"), "---"),
+    (re.compile(r"[.]{3,}"), "..."),
+    (re.compile(r"[-]{3,}"), "---"),
+    (re.compile(r"[=]{3,}"), "==="),
+    (re.compile(r"[,;]{2,}"), ","),
+]
+
+_NUMBER_DATE_PATTERNS = [
+    (re.compile(r"(\d+)\.0+\b"), r"\1"),
+    (re.compile(r"(\d+)\.0+%"), r"\1%"),
+    (re.compile(r"(\d{1,2})/(\d{1,2})/(\d{4})"), r"\1/\2/\3"),
+]
+
+_CONTROL_CHARS_PATTERN = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")
+_TABLE_SPACES_PATTERN = re.compile(r" {2,}")
+_ALPHANUMERIC_PATTERN = re.compile(r"[a-zA-Z0-9]")
+
+_UNICODE_ESCAPE_PATTERN = re.compile(r"/uni[0-9A-Fa-f]{4,5}")
+_MULTILINE_DIGIT_PATTERN = re.compile(r"^\s*\d+\s*\(\d+\)\s*$", re.MULTILINE)
+_FINAL_NEWLINE_PATTERN = re.compile(r"\n{3,}")
+
+_WATERMARK_PATTERNS = [
+    re.compile(r"Tämä julkaisu on ladattu SFS Online-palvelusta.*?(?=\n|$)"),
+    re.compile(r"Tämä julkaisu on ostettu SFS Kaupasta.*?(?=\n|$)"),
+    re.compile(r"Lataaja: IP-käyttäjä\..*?(?=\n|$)"),
+    re.compile(r"Julkaisua saa tulostaa 1 kpl ja asentaa 1 työasemalle\..*?(?=\n|$)"),
+    re.compile(r"Suomen Standardisoimisliitto SFS SFS-EN.*?(?=\n|$)"),
+    re.compile(r"Finnish Standards Association SFS \d+.*?(?=\n|$)"),
+    re.compile(r"Monta tapaa tilata.*?(?=\n|$)"),
+    re.compile(r"Pysy ajan tasalla.*?(?=\n|$)"),
+    re.compile(r"SFS-kauppa.*?(?=\n|$)"),
+    re.compile(r"SFS Online.*?(?=\n|$)"),
+    re.compile(r"Asiakaspalvelu auttaa.*?(?=\n|$)"),
+    re.compile(r"facebook\.com/Standardeista.*?(?=\n|$)"),
+    re.compile(r"@standardeista.*?(?=\n|$)"),
+    re.compile(r"Haluatko tietää.*?(?=\n|$)"),
+    re.compile(r"Tilaa sähköinen.*?(?=\n|$)"),
+    re.compile(r"Verkkokaupassa.*?(?=\n|$)"),
+    re.compile(r"Kiinnostuitko.*?(?=\n|$)"),
+    re.compile(r"Ota yh.*?(?=\n|$)"),
+    re.compile(r"Tätä julkaisua myy.*?(?=\n|$)"),
+    re.compile(r"Julkaistu: SFS.*?(?=\n|$)"),
+    re.compile(r"Copyright \(C\) SFS\..*?(?=\n|$)"),
+    re.compile(r"\(C\) ISO \d+ - All rights reserved.*?(?=\n|$)"),
+    re.compile(r"\(C\) SFS \d+ for the translation.*?(?=\n|$)"),
+    re.compile(r"\(C\) \d+ CEN/CLC.*?(?=\n|$)"),
+    re.compile(r"CEN-CENELEC Management Centre:.*?(?=\n|$)"),
+    re.compile(r"Tietopalvelumme tarjoaa.*?(?=\n|$)"),
+    re.compile(r"Lue lisää www.*?(?=\n|$)"),
+    re.compile(r"Kysy lisää SFS:n asiakaspalve.*?(?=\n|$)"),
+]
+
+_WHITESPACE_LINE_PATTERNS = [
+    (re.compile(r" {50,}([^\s\n]+.*?[^\s\n]+) {10,}\\\\n"), r"\1\n"),
+    (re.compile(r" {20,}\\\\n"), "\n"),
+    (re.compile(r"^ {20,}(.{1,50}) {10,}$", re.MULTILINE), r"\1"),
+]
+
 
 def normalize_whitespace(text: str) -> str:
     """Normalize whitespace to reduce token count."""
-    text = re.sub(r" {10,}", " ", text)
-    text = re.sub(r" {2,}", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    text = re.sub(r" +\n", "\n", text)
-    text = re.sub(r"\n +", "\n", text)
+    for pattern, replacement in _WHITESPACE_PATTERNS:
+        text = pattern.sub(replacement, text)
     return text
 
 
 def clean_excel_artifacts(text: str) -> str:
     """Clean Excel/spreadsheet-specific artifacts."""
-    text = re.sub(r"\\\\+n", "\n", text)
-    text = re.sub(r"\\n", "\n", text)
-    text = re.sub(r"Unnamed: \d+", "Col", text)
-    text = re.sub(r"\bNaN\b", "-", text)
-    text = re.sub(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", lambda m: m.group(0).split()[0] if ' ' in m.group(0) else m.group(0), text)
-    text = re.sub(r"(\w+)\.\d+", r"\1", text)
+    for pattern, replacement in _EXCEL_PATTERNS:
+        text = pattern.sub(replacement, text)
+
+    # Special handling for datetime pattern
+    text = _EXCEL_DATETIME_PATTERN.sub(
+        lambda m: m.group(0).split()[0] if ' ' in m.group(0) else m.group(0),
+        text
+    )
     return text
 
 
 def remove_redundant_patterns(text: str) -> str:
     """Remove patterns that repeat excessively."""
-    text = re.sub(r"[-=_]{10,}", "---", text)
-    text = re.sub(r"[.]{3,}", "...", text)
-    text = re.sub(r"[-]{3,}", "---", text)
-    text = re.sub(r"[=]{3,}", "===", text)
-    text = re.sub(r"[,;]{2,}", ",", text)
+    for pattern, replacement in _REDUNDANT_PATTERNS:
+        text = pattern.sub(replacement, text)
     return text
 
 
 def optimize_numbers_and_dates(text: str) -> str:
     """Optimize number and date formatting."""
-    text = re.sub(r"(\d+)\.0+\b", r"\1", text)
-    text = re.sub(r"(\d+)\.0+%", r"\1%", text)
-    text = re.sub(r"(\d{1,2})/(\d{1,2})/(\d{4})", r"\1/\2/\3", text)
+    for pattern, replacement in _NUMBER_DATE_PATTERNS:
+        text = pattern.sub(replacement, text)
     return text
 
 
@@ -73,7 +146,7 @@ def clean_special_characters(text: str) -> str:
     for old, new in replacements.items():
         text = text.replace(old, new)
 
-    text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]", "", text)
+    text = _CONTROL_CHARS_PATTERN.sub("", text)
     return text
 
 
@@ -84,7 +157,7 @@ def compress_table_formatting(text: str) -> str:
 
     for line in lines:
         if line.count(" ") > 10 or line.count("\t") > 3:
-            compressed_line = re.sub(r" {2,}", " | ", line.strip())
+            compressed_line = _TABLE_SPACES_PATTERN.sub(" | ", line.strip())
             compressed_lines.append(compressed_line)
         else:
             compressed_lines.append(line)
@@ -94,9 +167,8 @@ def compress_table_formatting(text: str) -> str:
 
 def remove_excessive_whitespace_patterns(text: str) -> str:
     """Remove specific patterns of excessive whitespace."""
-    text = re.sub(r" {50,}([^\s\n]+.*?[^\s\n]+) {10,}\\\\n", r"\1\n", text)
-    text = re.sub(r" {20,}\\\\n", "\n", text)
-    text = re.sub(r"^ {20,}(.{1,50}) {10,}$", r"\1", text, flags=re.MULTILINE)
+    for pattern, replacement in _WHITESPACE_LINE_PATTERNS:
+        text = pattern.sub(replacement, text)
     return text
 
 
@@ -107,7 +179,7 @@ def remove_empty_sections(text: str) -> str:
 
     for line in lines:
         stripped = line.strip()
-        if re.search(r"[a-zA-Z0-9]", stripped):
+        if _ALPHANUMERIC_PATTERN.search(stripped):
             meaningful_lines.append(line)
         elif stripped and len(stripped) <= 3:
             meaningful_lines.append(line)
@@ -117,43 +189,12 @@ def remove_empty_sections(text: str) -> str:
 
 def remove_pdf_watermarks_and_unicode_escapes(text: str) -> str:
     """Remove PDF watermarks and unicode escape sequences."""
-    text = re.sub(r"/uni[0-9A-Fa-f]{4,5}", "", text)
+    text = _UNICODE_ESCAPE_PATTERN.sub("", text)
 
-    patterns_to_remove = [
-        r"Tämä julkaisu on ladattu SFS Online-palvelusta.*?(?=\n|$)",
-        r"Tämä julkaisu on ostettu SFS Kaupasta.*?(?=\n|$)",
-        r"Lataaja: IP-käyttäjä\..*?(?=\n|$)",
-        r"Julkaisua saa tulostaa 1 kpl ja asentaa 1 työasemalle\..*?(?=\n|$)",
-        r"Suomen Standardisoimisliitto SFS SFS-EN.*?(?=\n|$)",
-        r"Finnish Standards Association SFS \d+.*?(?=\n|$)",
-        r"Monta tapaa tilata.*?(?=\n|$)",
-        r"Pysy ajan tasalla.*?(?=\n|$)",
-        r"SFS-kauppa.*?(?=\n|$)",
-        r"SFS Online.*?(?=\n|$)",
-        r"Asiakaspalvelu auttaa.*?(?=\n|$)",
-        r"facebook\.com/Standardeista.*?(?=\n|$)",
-        r"@standardeista.*?(?=\n|$)",
-        r"Haluatko tietää.*?(?=\n|$)",
-        r"Tilaa sähköinen.*?(?=\n|$)",
-        r"Verkkokaupassa.*?(?=\n|$)",
-        r"Kiinnostuitko.*?(?=\n|$)",
-        r"Ota yh.*?(?=\n|$)",
-        r"Tätä julkaisua myy.*?(?=\n|$)",
-        r"Julkaistu: SFS.*?(?=\n|$)",
-        r"Copyright \(C\) SFS\..*?(?=\n|$)",
-        r"\(C\) ISO \d+ - All rights reserved.*?(?=\n|$)",
-        r"\(C\) SFS \d+ for the translation.*?(?=\n|$)",
-        r"\(C\) \d+ CEN/CLC.*?(?=\n|$)",
-        r"CEN-CENELEC Management Centre:.*?(?=\n|$)",
-        r"Tietopalvelumme tarjoaa.*?(?=\n|$)",
-        r"Lue lisää www.*?(?=\n|$)",
-        r"Kysy lisää SFS:n asiakaspalve.*?(?=\n|$)",
-    ]
+    for pattern in _WATERMARK_PATTERNS:
+        text = pattern.sub("", text)
 
-    for pattern in patterns_to_remove:
-        text = re.sub(pattern, "", text)
-
-    text = re.sub(r"^\s*\d+\s*\(\d+\)\s*$", "", text, flags=re.MULTILINE)
+    text = _MULTILINE_DIGIT_PATTERN.sub("", text)
 
     return text
 
@@ -174,6 +215,6 @@ def sanitize_text(text: str) -> str:
     text = remove_empty_sections(text)
 
     text = text.strip()
-    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = _FINAL_NEWLINE_PATTERN.sub("\n\n", text)
 
     return text

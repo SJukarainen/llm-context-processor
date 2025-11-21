@@ -1,16 +1,16 @@
 """JSON metadata output generator for context processor."""
 
 import json
+import logging
 import os
-import sys
 import threading
-import unicodedata
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from llm_context_processor.config import JsonOutputConfig
+
+logger = logging.getLogger(__name__)
 
 
 DOCUMENT_TYPE_MAP = {
@@ -33,35 +33,6 @@ DOCUMENT_TYPE_MAP = {
     ".odt": "document",
     ".epub": "document",
 }
-
-
-def clean_json_string(text: str) -> str:
-    """Clean text to make it safe for JSON serialization."""
-    if not isinstance(text, str):
-        return text
-
-    text = unicodedata.normalize("NFKC", text)
-    text = text.replace("\\", "\\\\")
-    text = text.replace('"', '\\"')
-    text = text.replace("\n", "\\n")
-    text = text.replace("\r", "\\r")
-    text = text.replace("\t", "\\t")
-    text = text.replace("\b", "\\b")
-    text = text.replace("\f", "\\f")
-
-    return text
-
-
-def clean_json_data(data):
-    """Recursively clean all string values in a data structure for JSON serialization."""
-    if isinstance(data, dict):
-        return {key: clean_json_data(value) for key, value in data.items()}
-    elif isinstance(data, list):
-        return [clean_json_data(item) for item in data]
-    elif isinstance(data, str):
-        return clean_json_string(data)
-    else:
-        return data
 
 
 class JsonOutputGenerator:
@@ -162,15 +133,13 @@ class JsonOutputGenerator:
             "documents": documents_for_json,
         }
 
-        cleaned_data = clean_json_data(json_data)
-
         try:
             with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(cleaned_data, f, indent=2, ensure_ascii=False)
-            print(f"Writing JSON metadata: {json_path}")
+                json.dump(json_data, f, indent=2, ensure_ascii=False)
+            logger.info("Writing JSON metadata: %s", json_path)
             return json_path
-        except (IOError, OSError, PermissionError):
-            print(f"Error writing JSON metadata file", file=sys.stderr)
+        except (IOError, OSError, PermissionError) as e:
+            logger.error("Error writing JSON metadata file: %s", e)
             return ""
 
     def write_combined_file(self) -> str:
@@ -193,11 +162,11 @@ class JsonOutputGenerator:
                     f.write(content)
                     f.write("\n")
 
-            print(f"Writing combined file: {combined_path}")
+            logger.info("Writing combined file: %s", combined_path)
             return combined_path
 
-        except (IOError, OSError, PermissionError):
-            print(f"Error writing combined file", file=sys.stderr)
+        except (IOError, OSError, PermissionError) as e:
+            logger.error("Error writing combined file: %s", e)
             return ""
 
     def _calculate_json_path(self) -> str:

@@ -35,16 +35,3 @@ class BaseExtractor(ABC):
     def extract(self, file_path: str) -> ExtractionResult:
         """Extract text from the file."""
         pass
-
-    def is_extraction_quality_sufficient(self, result: ExtractionResult) -> bool:
-        """Check if extraction quality is sufficient."""
-        if not result.success:
-            return False
-
-        if result.char_count < 50:
-            return False
-
-        if result.error_message:
-            return False
-
-        return True

@@ -12,6 +12,13 @@ from llm_context_processor.extractors.base import BaseExtractor, ExtractionResul
 class MarkItDownExtractor(BaseExtractor):
     """Unified extractor using Microsoft's MarkItDown for all document types."""
 
+    # Quality thresholds
+    MIN_CHAR_COUNT = 50
+    MIN_WORD_COUNT = 10
+    MAX_GARBLED_RATIO = 0.3
+    SIZE_MISMATCH_FILE_KB_THRESHOLD = 100
+    SIZE_MISMATCH_TEXT_CHAR_THRESHOLD = 200
+
     SUPPORTED_EXTENSIONS = {
         ".pdf",
         ".docx",
@@ -87,20 +94,21 @@ class MarkItDownExtractor(BaseExtractor):
         if not text or len(text.strip()) == 0:
             return "empty_text"
 
-        if len(text) < 50:
+        if len(text) < self.MIN_CHAR_COUNT:
             return "very_short_text"
 
         garbled_ratio = self._calculate_garbled_ratio(text)
-        if garbled_ratio > 0.3:
+        if garbled_ratio > self.MAX_GARBLED_RATIO:
             return f"high_garbled_ratio_{garbled_ratio:.2f}"
 
         words = text.split()
-        if len(words) < 10:
+        if len(words) < self.MIN_WORD_COUNT:
             return "very_few_words"
 
         try:
             file_size_kb = Path(file_path).stat().st_size / 1024
-            if file_size_kb > 100 and len(text) < 200:
+            if (file_size_kb > self.SIZE_MISMATCH_FILE_KB_THRESHOLD and
+                len(text) < self.SIZE_MISMATCH_TEXT_CHAR_THRESHOLD):
                 return f"size_mismatch_file={file_size_kb:.0f}kb_text={len(text)}chars"
         except (FileNotFoundError, OSError):
             pass
@@ -124,16 +132,3 @@ class MarkItDownExtractor(BaseExtractor):
             garbled_count += len(re.findall(pattern, text))
 
         return garbled_count / max(len(text), 1)
-
-    def is_extraction_quality_sufficient(self, result: ExtractionResult) -> bool:
-        """Check if extraction quality is sufficient."""
-        if not result.success:
-            return False
-
-        if result.char_count < 50:
-            return False
-
-        if result.error_message:
-            return False
-
-        return True

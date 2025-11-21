@@ -1,7 +1,6 @@
 """Configuration management for llm-context-processor."""
 
 from dataclasses import dataclass, field
-from pathlib import Path
 
 import yaml
 
@@ -12,7 +11,6 @@ class OutputConfig:
 
     format: str = "md"
     include_metadata_header: bool = True
-    parallel_structure: bool = True
 
 
 @dataclass
@@ -68,13 +66,27 @@ class ProcessorConfig:
 
     @classmethod
     def from_yaml(cls, yaml_path: str) -> "ProcessorConfig":
-        """Load configuration from YAML file."""
-        with open(yaml_path, "r") as f:
+        """Load configuration from YAML file with validation."""
+        with open(yaml_path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
-        output_config = OutputConfig(**data.get("output", {}))
-        extraction_config = ExtractionConfig(**data.get("extraction", {}))
-        json_output_config = JsonOutputConfig(**data.get("json_output", {}))
+        if not isinstance(data, dict):
+            raise ValueError(f"Invalid YAML configuration: expected dict, got {type(data).__name__}")
+
+        # Validate extraction config values
+        extraction_data = data.get("extraction", {})
+        if "max_file_size_mb" in extraction_data:
+            size = extraction_data["max_file_size_mb"]
+            if not isinstance(size, (int, float)) or size <= 0:
+                raise ValueError(f"max_file_size_mb must be a positive number, got {size}")
+
+        # Construct configs with validation
+        try:
+            output_config = OutputConfig(**data.get("output", {}))
+            extraction_config = ExtractionConfig(**extraction_data)
+            json_output_config = JsonOutputConfig(**data.get("json_output", {}))
+        except TypeError as e:
+            raise ValueError(f"Invalid configuration parameters: {e}") from e
 
         return cls(
             output=output_config,
@@ -93,7 +105,6 @@ class ProcessorConfig:
             "output": {
                 "format": self.output.format,
                 "include_metadata_header": self.output.include_metadata_header,
-                "parallel_structure": self.output.parallel_structure,
             },
             "extraction": {
                 "skip_hidden_files": self.extraction.skip_hidden_files,
